@@ -1,19 +1,16 @@
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, render_template, jsonify, redirect
 import yt_dlp
-import os
-import logging
+import requests
+import re
+import urllib.parse
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Simple in-memory cache
+# Cache đơn giản
 cache = {}
 
-# Optimized yt-dlp configuration
+# Cấu hình yt-dlp tối ưu
 ydl_opts = {
     'format': 'bestaudio/best',
     'quiet': True,
@@ -23,41 +20,56 @@ ydl_opts = {
     'audioformat': 'mp3',
     'default_search': 'ytsearch1',
     'nocheckcertificate': True,
-    'ignoreerrors': True,
+    'ignoreerrors': False,
     'logtostderr': False,
     'no_call_home': True,
     'no_color': True,
-    'socket_timeout': 10,
+    'socket_timeout': 15,
+    'extract_flat': False,
 }
 
-def search_youtube(song):
-    """Search YouTube and return audio info"""
+def get_audio_info(song):
+    """Lấy thông tin audio từ YouTube"""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(song, download=False)
+            # Thêm tiền tố tìm kiếm nếu chưa có
+            if not re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/', song):
+                search_query = f"ytsearch1:{song}"
+            else:
+                search_query = song
+                
+            info = ydl.extract_info(search_query, download=False)
             
-            # Check if we got valid results
             if not info:
-                logger.error(f"No results found for: {song}")
                 return None
                 
-            # Handle search results (ytsearch returns entries)
+            # Xử lý kết quả tìm kiếm
             if 'entries' in info:
                 if not info['entries']:
-                    logger.error(f"No entries in search results for: {song}")
                     return None
                 video = info['entries'][0]
             else:
                 video = info
 
-            # Validate we have required fields
-            if not video.get('url'):
-                logger.error(f"No audio URL found for: {song}")
+            # Lấy URL audio trực tiếp
+            audio_url = None
+            if 'url' in video:
+                audio_url = video['url']
+            else:
+                # Thử tìm trong formats
+                formats = video.get('formats', [])
+                for fmt in formats:
+                    if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
+                        audio_url = fmt.get('url')
+                        if audio_url:
+                            break
+            
+            if not audio_url:
                 return None
 
             return {
                 'title': video.get('title', 'Không có tiêu đề'),
-                'audio_url': video.get('url'),
+                'audio_url': audio_url,
                 'webpage_url': video.get('webpage_url', '#'),
                 'thumbnail': video.get('thumbnail', ''),
                 'duration': video.get('duration', 0),
@@ -65,7 +77,7 @@ def search_youtube(song):
             }
             
     except Exception as e:
-        logger.error(f"Error searching YouTube for {song}: {str(e)}")
+        print(f"Lỗi khi tìm nhạc: {str(e)}")
         return None
 
 @app.route('/')
@@ -78,7 +90,7 @@ def home():
         if cache_key in cache:
             result = cache[cache_key]
         else:
-            result = search_youtube(song)
+            result = get_audio_info(song)
             if result:
                 cache[cache_key] = result
     
@@ -86,7 +98,8 @@ def home():
                          title=result['title'] if result else None,
                          audio_url=result['audio_url'] if result else None,
                          webpage_url=result['webpage_url'] if result else None,
-                         thumbnail=result['thumbnail'] if result else None)
+                         thumbnail=result['thumbnail'] if result else None,
+                         song_query=song)
 
 @app.route('/search')
 def search_music():
@@ -95,20 +108,18 @@ def search_music():
     if not song:
         return jsonify({'error': 'Thiếu tên bài hát', 'success': False}), 400
 
-    # Check cache first
     cache_key = song.lower()
     if cache_key in cache:
         result = cache[cache_key]
         result['cached'] = True
         return jsonify(result)
 
-    # Search YouTube
-    result = search_youtube(song)
+    result = get_audio_info(song)
     if result:
         cache[cache_key] = result
         return jsonify(result)
     else:
-        return jsonify({'error': 'Không tìm thấy bài hát hoặc có lỗi xảy ra', 'success': False}), 404
+        return jsonify({'error': 'Không tìm thấy bài hát', 'success': False}), 404
 
 @app.route('/api/play', methods=['GET', 'POST'])
 def api_play():
@@ -121,20 +132,26 @@ def api_play():
     if not song:
         return jsonify({'error': 'Thiếu tham số song', 'success': False}), 400
 
-    # Use the same search logic
     cache_key = song.lower()
     if cache_key in cache:
         result = cache[cache_key]
         result['cached'] = True
         return jsonify(result)
 
-    result = search_youtube(song)
+    result = get_audio_info(song)
     if result:
         cache[cache_key] = result
         result['cached'] = False
         return jsonify(result)
     else:
         return jsonify({'error': 'Không tìm thấy bài hát', 'success': False}), 404
+
+# Redirect đến direct URL (giải pháp thay thế cho streaming)
+@app.route('/proxy/<path:url>')
+def proxy_audio(url):
+    """Redirect đến audio URL thực"""
+    decoded_url = urllib.parse.unquote(url)
+    return redirect(decoded_url)
 
 @app.route('/health')
 def health():
@@ -147,6 +164,5 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# Vercel requires this
 if __name__ == '__main__':
     app.run(debug=True)
