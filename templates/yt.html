@@ -1,65 +1,291 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Trình phát nhạc YouTube - Huankn1</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="" crossorigin="anonymous">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trình phát nhạc trực tuyến</title>
     <style>
-        body { background: linear-gradient(120deg,#f8fafc,#eef2ff 60%); font-family: "Segoe UI", Roboto, Arial; }
-        .card { border-radius: 12px; box-shadow: 0 6px 24px rgba(17,24,39,0.08); }
-        .search-input { width: 100%; max-width: 640px; }
-        .logo { font-weight: 700; letter-spacing: -0.5px; }
-        footer { font-size: 0.85rem; color: #6b7280; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e1e1e1;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        .player {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .song-info {
+            margin-bottom: 20px;
+        }
+
+        .song-title {
+            font-size: 20px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .song-thumbnail {
+            width: 200px;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 15px;
+        }
+
+        .links {
+            margin-top: 15px;
+        }
+
+        .link {
+            display: inline-block;
+            margin: 5px;
+            padding: 8px 15px;
+            background: #f1f1f1;
+            border-radius: 5px;
+            text-decoration: none;
+            color: #333;
+            transition: background 0.3s;
+        }
+
+        .link:hover {
+            background: #e1e1e1;
+        }
+
+        .loading {
+            display: none;
+            color: #667eea;
+            margin-top: 10px;
+        }
+
+        .error {
+            color: #e74c3c;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .api-info {
+            margin-top: 30px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            text-align: left;
+        }
+
+        .api-info h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        code {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
-<div class="container py-5">
-    <div class="text-center mb-4">
-        <h1 class="logo">🎧 Trình phát nhạc YouTube</h1>
-        <p class="text-muted">Nhập tên bài hát → tìm → phát trực tiếp (hỗ trợ thiết bị IoT)</p>
-    </div>
+    <div class="container">
+        <h1>🎵 Trình Phát Nhạc Trực Tuyến</h1>
+        
+        <div class="search-box">
+            <input type="text" id="songInput" placeholder="Nhập tên bài hát bạn muốn nghe...">
+            <button onclick="searchSong()">Tìm kiếm</button>
+        </div>
 
-    <div class="d-flex justify-content-center">
-        <div class="card p-4 w-100" style="max-width:900px;">
-            <form method="get" action="/">
-                <div class="input-group">
-                    <input class="form-control search-input" name="song" placeholder="Gõ tên bài hát hoặc nghệ sĩ (ví dụ: 'Coldplay Yellow')" required>
-                    <button class="btn btn-primary" type="submit">Tìm & Phát</button>
-                </div>
-            </form>
+        <div class="loading" id="loading">Đang tìm kiếm...</div>
+        <div class="error" id="error"></div>
 
-            {% if title %}
-            <hr>
-            <div class="row align-items-center">
-                <div class="col-md-8">
-                    <h4 class="mb-1">🎵 {{ title }}</h4>
-                    {% if webpage_url %}
-                        <p class="mb-2"><a href="{{ webpage_url }}" target="_blank">Mở trên YouTube</a></p>
-                    {% endif %}
-                    <audio controls autoplay style="width:100%;">
-                        <source src="{{ proxied_url }}" type="audio/mpeg">
-                        Trình duyệt của bạn không hỗ trợ thẻ audio.
-                    </audio>
-                </div>
-                <div class="col-md-4 text-end d-none d-md-block">
-                    <img src="https://img.icons8.com/external-tanah-basah-glyph-tanah-basah/96/000000/external-music-music-and-entertainment-tanah-basah-glyph-tanah-basah.png" alt="music" width="96">
-                </div>
+        <div class="player" id="player">
+            <div class="song-info">
+                <img id="thumbnail" class="song-thumbnail" src="" alt="Thumbnail">
+                <div class="song-title" id="songTitle"></div>
             </div>
-            {% endif %}
+            
+            <audio id="audioPlayer" controls>
+                Trình duyệt của bạn không hỗ trợ phát audio.
+            </audio>
 
-            <hr class="mt-4">
-            <div class="small text-muted">
-                API cho IoT: <code>POST /api/search</code> hoặc <code>GET /api/search?song=...</code> → trả về JSON với trường <code>proxied_url</code>.
-                <div class="mt-2">Ví dụ: <code>curl -X GET "http://YOUR_SERVER:5000/api/search?song=em+gai+mua"</code></div>
+            <div class="links">
+                <a id="webpageLink" class="link" href="#" target="_blank">🎬 Mở trên YouTube</a>
             </div>
+        </div>
+
+        <div class="api-info">
+            <h3>📡 API cho thiết bị IoT</h3>
+            <p><strong>GET Request:</strong><br>
+            <code>GET /api/play?song=TÊN_BÀI_HÁT</code></p>
+            
+            <p><strong>POST Request:</strong><br>
+            <code>POST /api/play<br>Content-Type: application/json<br>{"song": "TÊN_BÀI_HÁT"}</code></p>
         </div>
     </div>
 
-    <div class="text-center mt-4">
-        <footer>Made with ❤️ — Hỗ trợ phát trực tiếp bằng yt-dlp • Chạy trên <code>0.0.0.0:5000</code></footer>
-    </div>
-</div>
+    <script>
+        async function searchSong() {
+            const songInput = document.getElementById('songInput');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const player = document.getElementById('player');
+            
+            const song = songInput.value.trim();
+            if (!song) {
+                showError('Vui lòng nhập tên bài hát');
+                return;
+            }
+
+            // Reset states
+            hideError();
+            hidePlayer();
+            showLoading();
+
+            try {
+                const response = await fetch(`/search?song=${encodeURIComponent(song)}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Lỗi không xác định');
+                }
+
+                if (!data.success) {
+                    throw new Error(data.error || 'Không tìm thấy bài hát');
+                }
+
+                displaySong(data);
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function displaySong(data) {
+            const player = document.getElementById('player');
+            const songTitle = document.getElementById('songTitle');
+            const audioPlayer = document.getElementById('audioPlayer');
+            const webpageLink = document.getElementById('webpageLink');
+            const thumbnail = document.getElementById('thumbnail');
+
+            songTitle.textContent = data.title;
+            audioPlayer.src = data.audio_url;
+            webpageLink.href = data.webpage_url;
+            
+            if (data.thumbnail) {
+                thumbnail.src = data.thumbnail;
+                thumbnail.style.display = 'block';
+            } else {
+                thumbnail.style.display = 'none';
+            }
+
+            hideError();
+            showPlayer();
+            
+            // Auto play
+            audioPlayer.play().catch(e => {
+                console.log('Autoplay prevented:', e);
+            });
+        }
+
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function showError(message) {
+            const error = document.getElementById('error');
+            error.textContent = message;
+            error.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+
+        function showPlayer() {
+            document.getElementById('player').style.display = 'block';
+        }
+
+        function hidePlayer() {
+            document.getElementById('player').style.display = 'none';
+        }
+
+        // Allow search with Enter key
+        document.getElementById('songInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchSong();
+            }
+        });
+    </script>
 </body>
 </html>
