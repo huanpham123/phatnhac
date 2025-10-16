@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trình phát nhạc trực tuyến</title>
+    <title>Trình phát nhạc YouTube</title>
     <style>
         * {
             margin: 0;
@@ -16,25 +16,22 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
         }
 
         .container {
+            max-width: 800px;
+            margin: 0 auto;
             background: white;
             border-radius: 20px;
             box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-            padding: 40px;
-            width: 100%;
-            max-width: 500px;
-            text-align: center;
+            padding: 30px;
         }
 
         h1 {
             color: #333;
+            text-align: center;
             margin-bottom: 30px;
-            font-size: 28px;
+            font-size: 2.5em;
         }
 
         .search-box {
@@ -49,7 +46,6 @@
             border: 2px solid #e1e1e1;
             border-radius: 10px;
             font-size: 16px;
-            transition: border-color 0.3s;
         }
 
         input[type="text"]:focus {
@@ -65,136 +61,176 @@
             border-radius: 10px;
             cursor: pointer;
             font-size: 16px;
-            transition: transform 0.2s;
         }
 
         button:hover {
-            transform: translateY(-2px);
+            opacity: 0.9;
         }
 
         .player {
-            margin-top: 30px;
+            margin: 30px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
         }
 
         .song-info {
+            text-align: center;
             margin-bottom: 20px;
         }
 
         .song-title {
-            font-size: 20px;
+            font-size: 1.5em;
             color: #333;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
 
         .song-thumbnail {
-            width: 200px;
-            height: 150px;
-            object-fit: cover;
+            max-width: 300px;
             border-radius: 10px;
             margin-bottom: 15px;
         }
 
         audio {
             width: 100%;
-            margin-top: 15px;
+            margin: 15px 0;
         }
 
         .links {
+            text-align: center;
             margin-top: 15px;
         }
 
         .link {
             display: inline-block;
             margin: 5px;
-            padding: 8px 15px;
-            background: #f1f1f1;
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
             border-radius: 5px;
             text-decoration: none;
-            color: #333;
-            transition: background 0.3s;
         }
 
         .link:hover {
-            background: #e1e1e1;
+            background: #5a6fd8;
         }
 
         .error {
             color: #e74c3c;
-            margin-top: 15px;
-            padding: 10px;
+            text-align: center;
+            padding: 15px;
             background: #ffeaea;
-            border-radius: 5px;
-            display: none;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .success {
+            color: #27ae60;
+            text-align: center;
+            padding: 15px;
+            background: #eaffea;
+            border-radius: 10px;
+            margin: 20px 0;
         }
 
         .api-info {
             margin-top: 30px;
-            padding: 15px;
-            background: #f8f9fa;
+            padding: 20px;
+            background: #f1f3f4;
             border-radius: 10px;
-            text-align: left;
         }
 
         .api-info h3 {
-            margin-bottom: 10px;
+            margin-bottom: 15px;
             color: #333;
         }
 
         code {
             background: #e9ecef;
-            padding: 2px 6px;
+            padding: 5px 10px;
             border-radius: 4px;
             font-family: monospace;
+            display: block;
+            margin: 10px 0;
+            overflow-x: auto;
         }
 
         .hidden {
             display: none;
         }
+
+        .instructions {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎵 Trình Phát Nhạc Trực Tuyến</h1>
+        <h1>🎵 Trình Phát Nhạc YouTube</h1>
         
+        <div class="instructions">
+            <p><strong>Hướng dẫn:</strong> Nhập tên bài hát và nhấn Tìm kiếm. Nếu không phát được, hãy thử bài hát khác.</p>
+        </div>
+
         <form method="GET" action="/" class="search-box">
-            <input type="text" name="song" value="{{ request.args.get('song', '') }}" placeholder="Nhập tên bài hát bạn muốn nghe...">
-            <button type="submit">Tìm kiếm</button>
+            <input type="text" name="song" value="{{ song_query or '' }}" placeholder="Nhập tên bài hát (ví dụ: Shape of You Ed Sheeran)" required>
+            <button type="submit">🔍 Tìm kiếm</button>
         </form>
 
         {% if title %}
+        <div class="success">
+            ✅ Đã tìm thấy bài hát!
+        </div>
+
         <div class="player">
             <div class="song-info">
                 {% if thumbnail %}
-                <img src="{{ thumbnail }}" class="song-thumbnail" alt="Thumbnail">
+                <img src="{{ thumbnail }}" class="song-thumbnail" alt="Thumbnail" onerror="this.style.display='none'">
                 {% endif %}
                 <div class="song-title">{{ title }}</div>
             </div>
             
-            <audio controls autoplay>
+            <audio controls autoplay controlsList="nodownload">
                 <source src="{{ audio_url }}" type="audio/mpeg">
-                Trình duyệt của bạn không hỗ trợ thẻ audio.
+                Trình duyệt của bạn không hỗ trợ phát audio.
             </audio>
 
             <div class="links">
-                <a href="{{ webpage_url }}" class="link" target="_blank">🎬 Mở trên YouTube</a>
+                <a href="{{ webpage_url }}" class="link" target="_blank">🎬 Xem trên YouTube</a>
+                <a href="{{ audio_url }}" class="link" target="_blank">🔗 Link audio trực tiếp</a>
             </div>
         </div>
-        {% elif request.args.get('song') %}
+
+        <script>
+            // Tự động phát nhạc
+            document.addEventListener('DOMContentLoaded', function() {
+                const audio = document.querySelector('audio');
+                if (audio) {
+                    audio.play().catch(function(error) {
+                        console.log('Autoplay prevented:', error);
+                    });
+                }
+            });
+        </script>
+        {% elif song_query %}
         <div class="error">
-            Không tìm thấy bài hát "{{ request.args.get('song') }}". Vui lòng thử lại với tên khác.
+            ❌ Không tìm thấy bài hát "{{ song_query }}" hoặc không thể phát được. Vui lòng thử với tên bài hát khác.
         </div>
         {% endif %}
 
         <div class="api-info">
             <h3>📡 API cho thiết bị IoT</h3>
-            <p><strong>GET Request:</strong><br>
-            <code>GET /api/play?song=TÊN_BÀI_HÁT</code></p>
+            <p><strong>GET Request:</strong></p>
+            <code>GET /api/play?song={{ "TÊN+BÀI+HÁT" | urlencode }}</code>
             
-            <p><strong>POST Request:</strong><br>
-            <code>POST /api/play<br>Content-Type: application/json<br>{"song": "TÊN_BÀI_HÁT"}</code></p>
+            <p><strong>POST Request:</strong></p>
+            <code>POST /api/play<br>Content-Type: application/json<br>{ "song": "TÊN BÀI HÁT" }</code>
             
-            <p><strong>Search Endpoint:</strong><br>
-            <code>GET /search?song=TÊN_BÀI_HÁT</code></p>
+            <p><strong>Ví dụ với curl:</strong></p>
+            <code>curl "https://your-domain.vercel.app/api/play?song=Shape%20Of%20You"</code>
         </div>
     </div>
 </body>
