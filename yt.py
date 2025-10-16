@@ -1,168 +1,138 @@
-from flask import Flask, request, render_template, jsonify, redirect
-import yt_dlp
-import requests
-import re
-import urllib.parse
+# yt.py
+from flask import Flask, request, render_template, jsonify
+import requests, re, json, time, uuid
+from urllib.parse import quote_plus
 
-app = Flask(__name__)
-app.config['JSON_AS_ASCII'] = False
+app = Flask(__name__, template_folder="templates")
 
-# Cache đơn giản
-cache = {}
+# Simple in-memory cache (function instance lifetime)
+_cache = {}
 
-# Cấu hình yt-dlp tối ưu
-ydl_opts = {
-    'format': 'bestaudio/best',
-    'quiet': True,
-    'no_warnings': True,
-    'noplaylist': True,
-    'extractaudio': True,
-    'audioformat': 'mp3',
-    'default_search': 'ytsearch1',
-    'nocheckcertificate': True,
-    'ignoreerrors': False,
-    'logtostderr': False,
-    'no_call_home': True,
-    'no_color': True,
-    'socket_timeout': 15,
-    'extract_flat': False,
-}
+def youtube_search_first(song):
+    """
+    Trả về dict: { videoId, title, watch_url, embed_url }
+    Lấy từ YouTube search page bằng cách parse ytInitialData.
+    """
+    q = quote_plus(song)
+    url = f"https://www.youtube.com/results?search_query={q}&bpctr=9999999999"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
+    resp = requests.get(url, headers=headers, timeout=10)
+    text = resp.text
 
-def get_audio_info(song):
-    """Lấy thông tin audio từ YouTube"""
+    # tìm block JSON ytInitialData
+    m = re.search(r"var ytInitialData = ({.*?});</script>", text, re.S)
+    if not m:
+        m = re.search(r"ytInitialData\s*=\s*({.*?});", text, re.S)
+    if not m:
+        m = re.search(r"window\['ytInitialData'\]\s*=\s*({.*?});", text, re.S)
+    if not m:
+        # một số region sẽ khác, tìm "ytInitialData" mở ngoặc
+        m = re.search(r"ytInitialData\"\s*:\s*({.*?})\s*,\s*\"responseContext", text, re.S)
+    if not m:
+        raise Exception("Không thể trích xuất ytInitialData từ YouTube (có thể bị chặn).")
+
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Thêm tiền tố tìm kiếm nếu chưa có
-            if not re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/', song):
-                search_query = f"ytsearch1:{song}"
-            else:
-                search_query = song
-                
-            info = ydl.extract_info(search_query, download=False)
-            
-            if not info:
-                return None
-                
-            # Xử lý kết quả tìm kiếm
-            if 'entries' in info:
-                if not info['entries']:
-                    return None
-                video = info['entries'][0]
-            else:
-                video = info
-
-            # Lấy URL audio trực tiếp
-            audio_url = None
-            if 'url' in video:
-                audio_url = video['url']
-            else:
-                # Thử tìm trong formats
-                formats = video.get('formats', [])
-                for fmt in formats:
-                    if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
-                        audio_url = fmt.get('url')
-                        if audio_url:
-                            break
-            
-            if not audio_url:
-                return None
-
-            return {
-                'title': video.get('title', 'Không có tiêu đề'),
-                'audio_url': audio_url,
-                'webpage_url': video.get('webpage_url', '#'),
-                'thumbnail': video.get('thumbnail', ''),
-                'duration': video.get('duration', 0),
-                'success': True
-            }
-            
+        data = json.loads(m.group(1))
     except Exception as e:
-        print(f"Lỗi khi tìm nhạc: {str(e)}")
+        raise Exception("Phân tích JSON thất bại: " + str(e))
+
+    # đệ quy tìm videoRenderer
+    def find_video_renderer(node):
+        if isinstance(node, dict):
+            if "videoRenderer" in node:
+                return node["videoRenderer"]
+            for v in node.values():
+                res = find_video_renderer(v)
+                if res:
+                    return res
+        elif isinstance(node, list):
+            for item in node:
+                res = find_video_renderer(item)
+                if res:
+                    return res
         return None
 
-@app.route('/')
-def home():
-    song = request.args.get('song', '').strip()
-    result = None
-    
-    if song:
-        cache_key = song.lower()
-        if cache_key in cache:
-            result = cache[cache_key]
+    vr = find_video_renderer(data)
+    if not vr:
+        raise Exception("Không tìm thấy video trong kết quả tìm kiếm YouTube.")
+
+    vid = vr.get("videoId")
+    # lấy tiêu đề
+    title = "Không rõ tiêu đề"
+    title_info = vr.get("title")
+    if isinstance(title_info, dict):
+        runs = title_info.get("runs") or []
+        if runs:
+            title = "".join([r.get("text", "") for r in runs])
         else:
-            result = get_audio_info(song)
-            if result:
-                cache[cache_key] = result
-    
-    return render_template('yt.html', 
-                         title=result['title'] if result else None,
-                         audio_url=result['audio_url'] if result else None,
-                         webpage_url=result['webpage_url'] if result else None,
-                         thumbnail=result['thumbnail'] if result else None,
-                         song_query=song)
+            title = title_info.get("simpleText") or title
+    elif isinstance(title_info, str):
+        title = title_info
 
-@app.route('/search')
-def search_music():
-    song = request.args.get('song', '').strip()
-    
-    if not song:
-        return jsonify({'error': 'Thiếu tên bài hát', 'success': False}), 400
+    watch_url = f"https://www.youtube.com/watch?v={vid}"
+    embed_url = f"https://www.youtube.com/embed/{vid}?autoplay=1&rel=0"
 
-    cache_key = song.lower()
-    if cache_key in cache:
-        result = cache[cache_key]
-        result['cached'] = True
-        return jsonify(result)
-
-    result = get_audio_info(song)
-    if result:
-        cache[cache_key] = result
-        return jsonify(result)
-    else:
-        return jsonify({'error': 'Không tìm thấy bài hát', 'success': False}), 404
-
-@app.route('/api/play', methods=['GET', 'POST'])
-def api_play():
-    if request.method == 'POST':
-        data = request.get_json() or {}
-        song = data.get('song', '').strip()
-    else:
-        song = request.args.get('song', '').strip()
-
-    if not song:
-        return jsonify({'error': 'Thiếu tham số song', 'success': False}), 400
-
-    cache_key = song.lower()
-    if cache_key in cache:
-        result = cache[cache_key]
-        result['cached'] = True
-        return jsonify(result)
-
-    result = get_audio_info(song)
-    if result:
-        cache[cache_key] = result
-        result['cached'] = False
-        return jsonify(result)
-    else:
-        return jsonify({'error': 'Không tìm thấy bài hát', 'success': False}), 404
-
-# Redirect đến direct URL (giải pháp thay thế cho streaming)
-@app.route('/proxy/<path:url>')
-def proxy_audio(url):
-    """Redirect đến audio URL thực"""
-    decoded_url = urllib.parse.unquote(url)
-    return redirect(decoded_url)
-
-@app.route('/health')
-def health():
-    return jsonify({'status': 'healthy', 'message': 'Server is running'})
+    return {"videoId": vid, "title": title, "watch_url": watch_url, "embed_url": embed_url}
 
 @app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+def add_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Range"
     return response
 
-if __name__ == '__main__':
-    app.run(debug=True)
+@app.route("/", methods=["GET"])
+def index():
+    song = (request.args.get("song") or "").strip()
+    result = None
+    if song:
+        key = song.lower()
+        entry = _cache.get(key)
+        if entry and (time.time() - entry.get("ts", 0) < 60*60):  # cache 1 giờ
+            result = entry["data"]
+        else:
+            try:
+                info = youtube_search_first(song)
+                result = info
+                _cache[key] = {"ts": time.time(), "data": info}
+            except Exception as e:
+                result = {"error": str(e)}
+
+    return render_template("yt.html", result=result, song=song)
+
+@app.route("/api/search", methods=["GET","POST","OPTIONS"])
+def api_search():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+    song = ""
+    if request.is_json:
+        song = (request.json.get("song") or "").strip()
+    if not song:
+        song = (request.args.get("song") or "").strip()
+    if not song:
+        return jsonify({"ok": False, "error": "Thiếu tham số 'song'"}), 400
+
+    key = song.lower()
+    entry = _cache.get(key)
+    if entry and (time.time() - entry.get("ts", 0) < 60*60):
+        info = entry["data"]
+    else:
+        try:
+            info = youtube_search_first(song)
+            _cache[key] = {"ts": time.time(), "data": info}
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({
+        "ok": True,
+        "title": info["title"],
+        "watch_url": info["watch_url"],
+        "embed_url": info["embed_url"],
+        "videoId": info["videoId"]
+    })
+
+# cho local dev
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
