@@ -1,14 +1,19 @@
 from flask import Flask, request, render_template, jsonify
 import yt_dlp
 import os
+import logging
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
 
-# Simple in-memory cache (resets on cold start)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Simple in-memory cache
 cache = {}
 
-# Optimized yt-dlp configuration for Vercel
+# Optimized yt-dlp configuration
 ydl_opts = {
     'format': 'bestaudio/best',
     'quiet': True,
@@ -23,39 +28,34 @@ ydl_opts = {
     'no_call_home': True,
     'no_color': True,
     'socket_timeout': 10,
-    'extract_flat': False,
 }
 
-@app.route('/')
-def home():
-    return render_template('yt.html')
-
-@app.route('/search')
-def search_music():
-    song = request.args.get('song', '').strip()
-    
-    if not song:
-        return jsonify({'error': 'Thiếu tên bài hát'}), 400
-
-    # Check cache first
-    cache_key = song.lower()
-    if cache_key in cache:
-        return jsonify(cache[cache_key])
-
+def search_youtube(song):
+    """Search YouTube and return audio info"""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(song, download=False)
             
+            # Check if we got valid results
             if not info:
-                return jsonify({'error': 'Không tìm thấy bài hát'}), 404
-
-            # Handle search results
+                logger.error(f"No results found for: {song}")
+                return None
+                
+            # Handle search results (ytsearch returns entries)
             if 'entries' in info:
+                if not info['entries']:
+                    logger.error(f"No entries in search results for: {song}")
+                    return None
                 video = info['entries'][0]
             else:
                 video = info
 
-            result = {
+            # Validate we have required fields
+            if not video.get('url'):
+                logger.error(f"No audio URL found for: {song}")
+                return None
+
+            return {
                 'title': video.get('title', 'Không có tiêu đề'),
                 'audio_url': video.get('url'),
                 'webpage_url': video.get('webpage_url', '#'),
@@ -63,15 +63,53 @@ def search_music():
                 'duration': video.get('duration', 0),
                 'success': True
             }
-
-            # Cache the result
-            cache[cache_key] = result
-            return jsonify(result)
-
+            
     except Exception as e:
-        return jsonify({'error': f'Lỗi khi tìm nhạc: {str(e)}'}), 500
+        logger.error(f"Error searching YouTube for {song}: {str(e)}")
+        return None
 
-# API for IoT devices
+@app.route('/')
+def home():
+    song = request.args.get('song', '').strip()
+    result = None
+    
+    if song:
+        cache_key = song.lower()
+        if cache_key in cache:
+            result = cache[cache_key]
+        else:
+            result = search_youtube(song)
+            if result:
+                cache[cache_key] = result
+    
+    return render_template('yt.html', 
+                         title=result['title'] if result else None,
+                         audio_url=result['audio_url'] if result else None,
+                         webpage_url=result['webpage_url'] if result else None,
+                         thumbnail=result['thumbnail'] if result else None)
+
+@app.route('/search')
+def search_music():
+    song = request.args.get('song', '').strip()
+    
+    if not song:
+        return jsonify({'error': 'Thiếu tên bài hát', 'success': False}), 400
+
+    # Check cache first
+    cache_key = song.lower()
+    if cache_key in cache:
+        result = cache[cache_key]
+        result['cached'] = True
+        return jsonify(result)
+
+    # Search YouTube
+    result = search_youtube(song)
+    if result:
+        cache[cache_key] = result
+        return jsonify(result)
+    else:
+        return jsonify({'error': 'Không tìm thấy bài hát hoặc có lỗi xảy ra', 'success': False}), 404
+
 @app.route('/api/play', methods=['GET', 'POST'])
 def api_play():
     if request.method == 'POST':
@@ -90,40 +128,18 @@ def api_play():
         result['cached'] = True
         return jsonify(result)
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(song, download=False)
-            
-            if not info:
-                return jsonify({'error': 'Không tìm thấy bài hát', 'success': False}), 404
+    result = search_youtube(song)
+    if result:
+        cache[cache_key] = result
+        result['cached'] = False
+        return jsonify(result)
+    else:
+        return jsonify({'error': 'Không tìm thấy bài hát', 'success': False}), 404
 
-            if 'entries' in info:
-                video = info['entries'][0]
-            else:
-                video = info
-
-            result = {
-                'title': video.get('title', 'Không có tiêu đề'),
-                'audio_url': video.get('url'),
-                'webpage_url': video.get('webpage_url', '#'),
-                'thumbnail': video.get('thumbnail', ''),
-                'duration': video.get('duration', 0),
-                'success': True,
-                'cached': False
-            }
-
-            cache[cache_key] = result
-            return jsonify(result)
-
-    except Exception as e:
-        return jsonify({'error': f'Lỗi khi tìm nhạc: {str(e)}', 'success': False}), 500
-
-# Health check endpoint for Vercel
 @app.route('/health')
 def health():
     return jsonify({'status': 'healthy', 'message': 'Server is running'})
 
-# Handle CORS
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
